@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.CommandLineUtils;
+using MoreLinq.Experimental;
 using Newtonsoft.Json;
 using NuGet.Packaging;
 using System;
@@ -15,6 +16,8 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace SourceLink {
+    using global::System.Threading;
+
     public class Program
     {
         public static int Main(string[] args)
@@ -204,7 +207,7 @@ namespace SourceLink {
         {
             var missingDocs = new List<Document>();
             var erroredDocs = new List<Document>();
-            var documents = GetDocumentsWithUrlHashes(drp, authenticationHeaderValueProvider).GetAwaiter().GetResult();
+            var documents = GetDocumentsWithUrlHashes(drp, authenticationHeaderValueProvider);
 
             foreach (var doc in documents)
             {
@@ -492,7 +495,7 @@ namespace SourceLink {
             return null;
         }
 
-        static async Task<IEnumerable<Document>> GetDocumentsWithUrlHashes(DebugReaderProvider drp, IAuthenticationHeaderValueProvider authenticationHeaderValueProvider)
+        static IEnumerable<Document> GetDocumentsWithUrlHashes(DebugReaderProvider drp, IAuthenticationHeaderValueProvider authenticationHeaderValueProvider)
         {
             // https://github.com/ctaggart/SourceLink/blob/v1/Exe/Http.fs
             // https://github.com/ctaggart/SourceLink/blob/v1/Exe/Checksums.fs
@@ -510,27 +513,24 @@ namespace SourceLink {
                     // if authentication is required get the header value
                     hc.DefaultRequestHeaders.Authorization = authenticationHeaderValueProvider.GetValue();
                 }
-                
-                var tasks = GetDocumentsWithUrls(drp)
-                    .Select(doc => CheckDocumentHash(hc, doc))
-                    .ToArray();
 
-                await Task.WhenAll(tasks);
-
-                return tasks.Select(x => x.Result);
+                foreach (var doc in GetDocumentsWithUrls(drp).Await((doc, ct) => CheckDocumentHash(hc, doc, ct)))
+                {
+                    yield return doc;
+                }
             }
         }
 
-        static async Task<Document> CheckDocumentHash(HttpClient hc, Document doc)
+        static async Task<Document> CheckDocumentHash(HttpClient hc, Document doc, CancellationToken cancellationToken)
         {
             if (doc.Url != null)
             {
-                await HashUrl(hc, doc);
+                await HashUrl(hc, doc, cancellationToken);
                 if (doc.Error == null)
                 {
                     if (!doc.Hash.CollectionEquals(doc.UrlHash))
                     {
-                        await HashUrlCrlf(hc, doc);
+                        await HashUrlCrlf(hc, doc, cancellationToken);
                         if (doc.Error == null)
                         {
                             if (!doc.Hash.CollectionEquals(doc.UrlHashCrlf))
@@ -544,10 +544,10 @@ namespace SourceLink {
             return doc;
         }
 
-        static async Task HashUrl(HttpClient hc, Document doc)
+        static async Task HashUrl(HttpClient hc, Document doc, CancellationToken cancellationToken)
         {
             using (var req = new HttpRequestMessage(HttpMethod.Get, doc.Url))
-            using (var rsp = await hc.SendAsync(req))
+            using (var rsp = await hc.SendAsync(req, cancellationToken))
             {
                 if (rsp.IsSuccessStatusCode)
                 {
@@ -565,10 +565,10 @@ namespace SourceLink {
             }
         }
 
-        static async Task HashUrlCrlf(HttpClient hc, Document doc)
+        static async Task HashUrlCrlf(HttpClient hc, Document doc, CancellationToken cancellationToken)
         {
             using (var req = new HttpRequestMessage(HttpMethod.Get, doc.Url))
-            using (var rsp = await hc.SendAsync(req))
+            using (var rsp = await hc.SendAsync(req, cancellationToken))
             {
                 if (rsp.IsSuccessStatusCode)
                 {
@@ -592,6 +592,7 @@ namespace SourceLink {
                                     {
                                         for (var i = 0; i < lines.Length - 1; i++)
                                         {
+                                            cancellationToken.ThrowIfCancellationRequested();
                                             sw.Write(lines[i]);
                                             sw.Write('\r');
                                             sw.Write('\n');
