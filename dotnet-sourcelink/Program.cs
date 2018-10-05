@@ -576,32 +576,16 @@ namespace SourceLink {
                     // TODO Is it more efficient to cache?
                     using (var ha = CreateHashAlgorithm(doc.HashAlgorithm))
                     {
-                        var fileBytes = new byte[] { };
-                        // https://github.com/ctaggart/SourceLink/blob/v1/Exe/LineFeed.fs#L31-L50
-                        // passing UTFEncoding without the BOM set allows it to be detected
-                        // http://stackoverflow.com/a/27976558/23059
-                        using (var sr = new StreamReader(stream, new UTF8Encoding(false)))
+                        using (var ms = new MemoryStream())
                         {
-                            var text = sr.ReadToEnd();
-                            var lines = text.Split(new char[] { '\n' });
-                            if (lines.Length > 0)
+                            int b;
+                            while ((b = stream.ReadByte()) >= 0)
                             {
-                                using (var ms = new MemoryStream())
-                                {
-                                    using (var sw = new StreamWriter(ms, sr.CurrentEncoding))
-                                    {
-                                        for (var i = 0; i < lines.Length - 1; i++)
-                                        {
-                                            sw.Write(lines[i]);
-                                            sw.Write('\r');
-                                            sw.Write('\n');
-                                        }
-                                        sw.Write(lines[lines.Length - 1]);
-                                    }
-                                    fileBytes = ms.ToArray();
-                                    doc.UrlHashCrlf = ha.ComputeHash(fileBytes);
-                                }
+                                if (b == '\n')
+                                    ms.WriteByte((byte) '\r');
+                                ms.WriteByte((byte) b);
                             }
+                            doc.UrlHashCrlf = ha.ComputeHash(ms.ToArray());
                         }
                     }
                 }
