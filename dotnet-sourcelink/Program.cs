@@ -547,7 +547,7 @@ namespace SourceLink {
         static async Task HashUrl(HttpClient hc, Document doc)
         {
             using (var req = new HttpRequestMessage(HttpMethod.Get, doc.Url))
-            using (var rsp = await hc.SendAsync(req))
+            using (var rsp = await hc.SendAsync(req, HttpCompletionOption.ResponseHeadersRead))
             {
                 if (rsp.IsSuccessStatusCode)
                 {
@@ -568,7 +568,7 @@ namespace SourceLink {
         static async Task HashUrlCrlf(HttpClient hc, Document doc)
         {
             using (var req = new HttpRequestMessage(HttpMethod.Get, doc.Url))
-            using (var rsp = await hc.SendAsync(req))
+            using (var rsp = await hc.SendAsync(req, HttpCompletionOption.ResponseHeadersRead))
             {
                 if (rsp.IsSuccessStatusCode)
                 {
@@ -576,17 +576,38 @@ namespace SourceLink {
                     // TODO Is it more efficient to cache?
                     using (var ha = CreateHashAlgorithm(doc.HashAlgorithm))
                     {
-                        using (var ms = new MemoryStream())
+                        const int growth = 256;
+                        var line = new byte[growth];
+                        var i = 0;
+
+                        void Write(byte w)
                         {
-                            int b;
-                            while ((b = stream.ReadByte()) >= 0)
-                            {
-                                if (b == '\n')
-                                    ms.WriteByte((byte) '\r');
-                                ms.WriteByte((byte) b);
-                            }
-                            doc.UrlHashCrlf = ha.ComputeHash(ms.ToArray());
+                            if (i == line.Length)
+                                Array.Resize(ref line, line.Length + growth);
+                            line[i++] = w;
                         }
+
+                        byte? Read()
+                        {
+                            var b = stream.ReadByte();
+                            return b < 0 ? null : (byte?) b;
+                        }
+
+                        while (Read() is byte r)
+                        {
+                            var eol = r == '\n';
+                            if (eol)
+                                Write((byte) '\r');
+                            Write(r);
+                            if (eol)
+                            {
+                                ha.TransformBlock(line, 0, i, null, 0);
+                                i = 0;
+                            }
+                        }
+
+                        ha.TransformFinalBlock(line, 0, i);
+                        doc.UrlHashCrlf = ha.Hash;
                     }
                 }
                 else
