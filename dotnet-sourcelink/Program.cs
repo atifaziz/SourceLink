@@ -186,7 +186,7 @@ namespace SourceLink {
                 return 0;
             });
         }
-        
+
         public static int TestFile(string path, IAuthenticationHeaderValueProvider authenticationHeaderValueProvider = null)
         {
             using (var drp = DebugReaderProvider.Create(path))
@@ -510,7 +510,7 @@ namespace SourceLink {
                     // if authentication is required get the header value
                     hc.DefaultRequestHeaders.Authorization = authenticationHeaderValueProvider.GetValue();
                 }
-                
+
                 var tasks = GetDocumentsWithUrls(drp)
                     .Select(doc => CheckDocumentHash(hc, doc))
                     .ToArray();
@@ -574,7 +574,7 @@ namespace SourceLink {
                 {
                     using (var stream = await rsp.Content.ReadAsStreamAsync())
                     // TODO Is it more efficient to cache?
-                    using (var ha = CreateHashAlgorithm(doc.HashAlgorithm))
+                    using (var ha = IncrementalHash.CreateHash(GetHashAlgorithmName(doc.HashAlgorithm)))
                     {
                         const int growth = 256;
                         var line = new byte[growth];
@@ -601,13 +601,13 @@ namespace SourceLink {
                             Write(r);
                             if (eol)
                             {
-                                ha.TransformBlock(line, 0, i, null, 0);
+                                ha.AppendData(line, 0, i);
                                 i = 0;
                             }
                         }
 
-                        ha.TransformFinalBlock(line, 0, i);
-                        doc.UrlHashCrlf = ha.Hash;
+                        ha.AppendData(line, 0, i);
+                        doc.UrlHashCrlf = ha.GetHashAndReset();
                     }
                 }
                 else
@@ -618,11 +618,14 @@ namespace SourceLink {
         }
 
         // IDisposable
-        public static HashAlgorithm CreateHashAlgorithm(Guid guid)
+        public static HashAlgorithm CreateHashAlgorithm(Guid guid) =>
+            HashAlgorithm.Create(GetHashAlgorithmName(guid).Name);
+
+        public static HashAlgorithmName GetHashAlgorithmName(Guid guid)
         {
-            if (guid == HashAlgorithmGuids.md5) return MD5.Create();
-            if (guid == HashAlgorithmGuids.sha1) return SHA1.Create();
-            if (guid == HashAlgorithmGuids.sha256) return SHA256.Create();
+            if (guid == HashAlgorithmGuids.md5) return HashAlgorithmName.MD5;
+            if (guid == HashAlgorithmGuids.sha1) return HashAlgorithmName.SHA1;;
+            if (guid == HashAlgorithmGuids.sha256) return HashAlgorithmName.SHA256;
             throw new CryptographicException("unknown HashAlgorithm " + guid);
         }
     }
